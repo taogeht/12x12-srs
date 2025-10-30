@@ -1,7 +1,9 @@
-import express, { Request, Response, RequestHandler } from 'express';
+import express, { Request, Response, RequestHandler, NextFunction } from 'express';
 import { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -866,6 +868,17 @@ app.post('/api/review/:cardStateId', async (req: Request, res: Response) => {
     client.release();
   }
 });
+
+const clientBuildPath = path.resolve(__dirname, '../../client/build');
+if (fs.existsSync(clientBuildPath)) {
+  app.use(express.static(clientBuildPath));
+  app.get('*', (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  });
+} else {
+  console.warn(`Client build assets not found at ${clientBuildPath}; API-only mode.`);
+}
 
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`API on :${port}`));
