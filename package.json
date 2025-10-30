@@ -1,0 +1,26 @@
+{
+  "name": "react-node-fullstack",
+  "version": "1.0.0",
+  "description": "A full-stack application with React frontend and Node.js backend",
+  "scripts": {
+    "install-all": "npm install && cd client && npm install && cd ../server && npm install",
+    "start": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build && cd ../server && npm run build",
+    "test": "cd client && npm test && cd ../server && npm test",
+    "setup-db": "cd server && npm run migrate"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": [
+    "react",
+    "node",
+    "express",
+    "fullstack",
+    "typescript"
+  ],
+  "author": "",
+  "license": "ISC"
+}
