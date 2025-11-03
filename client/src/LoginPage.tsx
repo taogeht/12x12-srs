@@ -43,24 +43,29 @@ export default function LoginPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [userListError, setUserListError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     setLoadingUsers(true);
+    setUserListError(null);
 
     (async () => {
       try {
         const response = await fetch('/api/users');
         const data: User[] = await response.json();
-        if (active) setUsers(filterUsers(data, isTeacherMode));
+        if (active) {
+          setUsers(filterUsers(data, isTeacherMode));
+          setUserListError(null);
+        }
       } catch (err) {
         console.error('Failed to load users:', err);
-        const demoUsers: User[] = [
-          { id: '40ff2b7b-038b-4936-98e1-17923256b2e6', username: 'alex', display_name: 'Alex Johnson', user_type: 'student', picture_password: '2' },
-          { id: '5f4a3c2d-1b9e-4a7b-8c9d-0e1f2a3b4c5d', username: 'sarah', display_name: 'Sarah Chen', user_type: 'student', picture_password: '3' },
-          { id: '13dc4a6f-e041-409b-a24d-ac276370ea93', username: 'admin', display_name: 'Admin', user_type: 'teacher', picture_password: '1' }
-        ];
-        if (active) setUsers(filterUsers(demoUsers, isTeacherMode));
+        if (active) {
+          setUsers([]);
+          setUserListError(
+            'Unable to load accounts. Please try again or contact your administrator.'
+          );
+        }
       } finally {
         if (active) setLoadingUsers(false);
       }
@@ -293,7 +298,7 @@ export default function LoginPage({
         maxWidth: '600px'
       }}>
         <h1 style={{ marginBottom: '8px', color: '#333' }}>
-          {isTeacherMode ? 'Teacher Portal' : '12×12 Math Practice'}
+          {isTeacherMode ? 'Teacher Portal' : '12x12'}
         </h1>
         <p style={{ marginBottom: '32px', color: '#666' }}>
           {isTeacherMode
@@ -369,14 +374,18 @@ export default function LoginPage({
           </div>
         ) : (
           <div style={{
-            marginBottom: '32px',
-            padding: '24px',
-            backgroundColor: '#fff3cd',
-            border: '1px solid #ffeeba',
-            borderRadius: '8px',
-            color: '#856404'
+            marginBottom: '32px'
           }}>
-            No {isTeacherMode ? 'teacher' : 'student'} accounts found. Please contact your administrator.
+            <div style={{
+              padding: '24px',
+              backgroundColor: userListError ? '#f8d7da' : '#fff3cd',
+              border: `1px solid ${userListError ? '#f5c6cb' : '#ffeeba'}`,
+              borderRadius: '8px',
+              color: userListError ? '#721c24' : '#856404'
+            }}>
+              {userListError ??
+                `No ${isTeacherMode ? 'teacher' : 'student'} accounts found. Please contact your administrator.`}
+            </div>
           </div>
         )}
 
@@ -410,26 +419,19 @@ export default function LoginPage({
               ← Back to student login
             </button>
           ) : (
-            <>
-              <p style={{ fontSize: '12px', color: '#999', marginBottom: '16px' }}>
-                <strong>Demo Accounts:</strong><br />
-                • Alex Johnson (Student) - Password: Cat 🐱<br />
-                • Sarah Chen (Student) - Password: Rabbit 🐰
-              </p>
-              <button
-                onClick={() => (window.location.href = '/teacher')}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#28a745',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
-                }}
-              >
-                Teacher login →
-              </button>
-            </>
+            <button
+              onClick={() => (window.location.href = '/teacher')}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              Teacher login →
+            </button>
           )}
         </div>
       </div>

@@ -1,7 +1,7 @@
 {
-  "name": "react-node-fullstack",
+  "name": "12x12",
   "version": "1.0.0",
-  "description": "A full-stack application with React frontend and Node.js backend",
+  "description": "12x12 is a multiplication practice platform with a React frontend and Node.js backend",
   "scripts": {
     "install-all": "npm install && cd client && npm install && cd ../server && npm install",
     "ci:client": "npm --prefix client ci",

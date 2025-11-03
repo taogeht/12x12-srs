@@ -88,12 +88,21 @@ export default function TeacherDashboard({ onLogout, userId }: { onLogout: () =>
       const response = await fetch(`/api/teacher/stats/${student.id}`, {
         headers: { 'X-User-Id': userId }
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data) {
+        const errorMessage =
+          data?.error ?? `Failed to load stats (${response.status})`;
+        throw new Error(errorMessage);
+      }
       setSelectedStudent(student);
-      setStudentStats(data.stats);
-      setReviewData(data.recentReviews);
+      setStudentStats(
+        data?.stats ?? { total_reviews: 0, correct_reviews: 0, cards_completed: 0 }
+      );
+      setReviewData(Array.isArray(data?.recentReviews) ? data.recentReviews : []);
     } catch (err) {
       console.error('Failed to load student stats:', err);
+      setStudentStats({ total_reviews: 0, correct_reviews: 0, cards_completed: 0 });
+      setReviewData([]);
     }
   };
 
@@ -179,9 +188,13 @@ export default function TeacherDashboard({ onLogout, userId }: { onLogout: () =>
         method: 'DELETE',
         headers: { 'X-User-Id': userId }
       });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to delete student');
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        const errMsg = data?.error || `Failed to delete student (${response.status})`;
+        throw new Error(errMsg);
+      }
+      if (data?.message) {
+        alert(data.message);
       }
       await loadStudents();
       if (selectedStudent?.id === student.id) {

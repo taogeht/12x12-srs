@@ -203,48 +203,26 @@ CREATE INDEX IF NOT EXISTS idx_srs_users_type ON srs.users(user_type);
 CREATE INDEX IF NOT EXISTS idx_srs_card_state_user_id ON srs.card_state(user_id);
 CREATE INDEX IF NOT EXISTS idx_srs_card_state_due_at ON srs.card_state(due_at);
 CREATE INDEX IF NOT EXISTS idx_srs_card_state_card_id ON srs.card_state(card_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_srs_cards_front_back ON srs.cards(front, back);
 CREATE INDEX IF NOT EXISTS idx_srs_student_progress_user_id ON srs.student_progress(user_id);
 CREATE INDEX IF NOT EXISTS idx_srs_reviews_user_id ON srs.reviews(user_id);
 CREATE INDEX IF NOT EXISTS idx_srs_reviews_created_at ON srs.reviews(created_at);
 
--- Insert sample data for testing
-
--- Insert sample users
-INSERT INTO srs.users (username, display_name, user_type, picture_password, email) VALUES 
-('student1', 'Student One', 'student', 'cat123', 'student1@example.com'),
-('teacher1', 'Teacher One', 'teacher', 'dog456', 'teacher1@example.com')
-ON CONFLICT (username) DO NOTHING;
-
--- Insert multiplication flashcards (12x12 as mentioned in the app)
-INSERT INTO srs.cards (front, back) VALUES
-('3 × 4', '12'),
-('6 × 7', '42'),
-('8 × 9', '72'),
-('11 × 12', '132'),
-('5 × 8', '40'),
-('9 × 9', '81'),
-('7 × 6', '42'),
-('12 × 10', '120'),
-('4 × 7', '28'),
-('3 × 12', '36')
-ON CONFLICT DO NOTHING;
-
--- Initialize student progress
-INSERT INTO srs.student_progress (user_id, total_reviews, correct_reviews, cards_completed)
-SELECT u.id, 0, 0, 0
-FROM srs.users u
-WHERE u.user_type = 'student'
-ON CONFLICT (user_id) DO NOTHING;
-
--- Initialize card states for student users
-INSERT INTO srs.card_state (user_id, card_id, due_at, interval_days, ease_factor, reps)
-SELECT 
-    u.id,
-    c.id,
-    NOW() - INTERVAL '1 day',  -- Due yesterday for immediate review
-    CASE WHEN c.id % 3 = 0 THEN 3 ELSE 1 END,  -- Some cards have longer intervals
-    CASE WHEN c.id % 2 = 0 THEN 2.8 ELSE 2.5 END,  -- Some cards have higher ease factor
-    CASE WHEN c.id % 4 = 0 THEN 2 ELSE 0 END  -- Some cards have been reviewed before
-FROM srs.users u, srs.cards c
-WHERE u.user_type = 'student'
-ON CONFLICT (user_id, card_id) DO NOTHING;
+-- Populate multiplication flashcards for the full 12 × 12 table
+DO $$
+DECLARE
+  multiplicand INTEGER;
+  multiplier INTEGER;
+  front_label TEXT;
+  back_value TEXT;
+BEGIN
+  FOR multiplicand IN 1..12 LOOP
+    FOR multiplier IN 1..12 LOOP
+      front_label := CONCAT(multiplicand, ' × ', multiplier);
+      back_value := (multiplicand * multiplier)::TEXT;
+      INSERT INTO srs.cards (front, back)
+      VALUES (front_label, back_value)
+      ON CONFLICT DO NOTHING;
+    END LOOP;
+  END LOOP;
+END $$;

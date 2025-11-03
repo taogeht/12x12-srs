@@ -42,6 +42,87 @@ interface StudentProgressPrivileges {
   update: boolean;
 }
 
+function parseStudentProgressPrivilegesOverride(
+  rawValue?: string | null
+): StudentProgressPrivileges | null {
+  if (!rawValue) return null;
+  const value = rawValue.trim().toLowerCase();
+  if (!value) return null;
+
+  const all = { select: true, insert: true, update: true };
+  const none = { select: false, insert: false, update: false };
+  const readOnly = { select: true, insert: false, update: false };
+  const writeOnly = { select: false, insert: true, update: true };
+
+  if (['none', 'false', 'off', 'disabled'].includes(value)) return none;
+  if (['all', 'true', 'on', 'full', 'readwrite', 'rw'].includes(value)) return all;
+  if (['read', 'select', 'ro', 'r'].includes(value)) return readOnly;
+  if (['write', 'wo', 'w'].includes(value)) return writeOnly;
+
+  const tokens = value.split(/[, ]+/).map(token => token.trim()).filter(Boolean);
+  if (tokens.length === 0) return null;
+
+  const override: StudentProgressPrivileges = { ...none };
+  let recognized = false;
+
+  for (const token of tokens) {
+    switch (token) {
+      case 'select':
+      case 'read':
+      case 'r':
+        override.select = true;
+        recognized = true;
+        break;
+      case 'insert':
+      case 'i':
+        override.insert = true;
+        recognized = true;
+        break;
+      case 'update':
+      case 'u':
+        override.update = true;
+        recognized = true;
+        break;
+      case 'write':
+      case 'w':
+        override.insert = true;
+        override.update = true;
+        recognized = true;
+        break;
+      case 'none':
+      case 'false':
+      case 'off':
+      case 'disabled':
+        override.select = false;
+        override.insert = false;
+        override.update = false;
+        recognized = true;
+        break;
+      case 'all':
+      case 'true':
+      case 'on':
+      case 'full':
+      case 'readwrite':
+      case 'rw':
+        override.select = true;
+        override.insert = true;
+        override.update = true;
+        recognized = true;
+        break;
+      default:
+        console.warn(
+          `Unrecognized token "${token}" in STUDENT_PROGRESS_PRIVILEGES override; ignoring token.`
+        );
+    }
+  }
+
+  return recognized ? override : null;
+}
+
+const studentProgressOverride = parseStudentProgressPrivilegesOverride(
+  process.env.STUDENT_PROGRESS_PRIVILEGES ?? null
+);
+
 let studentProgressPrivileges: StudentProgressPrivileges | null = null;
 
 function warnStudentProgress(message: string) {
@@ -51,9 +132,75 @@ function warnStudentProgress(message: string) {
   }
 }
 
+function formatReviewDay(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+
+    const coerced = new Date(`${value}Z`);
+    if (!Number.isNaN(coerced.getTime())) return coerced.toISOString();
+  }
+
+  console.warn(
+    'Unexpected review_day value returned from database; defaulting to current time.',
+    value
+  );
+  return new Date().toISOString();
+}
+
+async function archiveStudent(studentId: string): Promise<{ message: string } | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `
+      UPDATE srs.users
+         SET user_type = 'archived_student',
+             username = LEFT(
+               CONCAT(username, ':archived:', TO_CHAR(NOW(), 'YYYYMMDDHH24MISS')),
+               255
+             ),
+             display_name = LEFT(
+               CONCAT(display_name, ' (Archived)'),
+               255
+             ),
+             email = NULL,
+             updated_at = NOW()
+       WHERE id = $1
+         AND user_type = 'student'
+       RETURNING id
+      `,
+      [studentId]
+    );
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    await client.query('COMMIT');
+    return {
+      message:
+        'Student archived instead of deleted due to limited database permissions. They will no longer appear in the roster.'
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Failed to archive student during delete fallback', err);
+    return null;
+  } finally {
+    client.release();
+  }
+}
+
 async function ensureStudentProgressPrivileges(queryable?: Queryable): Promise<StudentProgressPrivileges> {
   if (studentProgressPrivileges) return studentProgressPrivileges;
   const runner = queryable ?? pool;
+  if (studentProgressOverride) {
+    studentProgressPrivileges = studentProgressOverride;
+    console.log(
+      `student_progress privileges overridden via STUDENT_PROGRESS_PRIVILEGES -> select=${studentProgressPrivileges.select}, insert=${studentProgressPrivileges.insert}, update=${studentProgressPrivileges.update}`
+    );
+    return studentProgressPrivileges;
+  }
   try {
     const { rows } = await runner.query<{
       can_select: boolean;
@@ -187,6 +334,32 @@ function coerceRatingValue(
   return gradeScore;
 }
 
+function buildRatingCorrectCondition(state: ReviewsColumnState): string {
+  const dataType = state.ratingDataType?.toLowerCase() ?? '';
+  if (
+    dataType.includes('int') ||
+    dataType.includes('numeric') ||
+    dataType.includes('decimal') ||
+    dataType.includes('double') ||
+    dataType.includes('real')
+  ) {
+    return 'r.rating >= 2';
+  }
+
+  if (dataType.includes('char') || dataType.includes('text')) {
+    return "LOWER(r.rating::text) IN ('good', 'easy', '3', '2')";
+  }
+
+  if (dataType === 'user-defined') {
+    const udt = state.ratingUdtName?.toLowerCase() ?? '';
+    if (udt.includes('review_rating') || udt.includes('grade')) {
+      return "LOWER(r.rating::text) IN ('good', 'easy')";
+    }
+  }
+
+  return "LOWER(r.rating::text) IN ('good', 'easy', '3', '2')";
+}
+
 async function logReviewEvent(
   client: PoolClient,
   userId: string,
@@ -298,7 +471,7 @@ app.post('/api/login', async (req: Request, res: Response) => {
   res.json({ user, success: true });
 });
 
-// Public endpoint to list users (for demo login flow)
+// Public endpoint to list users for the picture-password login selector
 app.get('/api/users', async (_req: Request, res: Response) => {
   const { rows } = await pool.query(
     `SELECT id, username, display_name, user_type, picture_password
@@ -449,27 +622,42 @@ app.get('/api/teacher/stats/:userId', async (req: Request, res: Response) => {
       cards_completed: Number(statsRow?.cards_completed ?? 0)
     };
 
-    const recentResult = await client.query(
-      `
-      SELECT 
-        date_trunc('day', r.created_at) AS review_day,
-        COUNT(*) AS reviews_count,
-        SUM(CASE WHEN r.grade IN ('good', 'easy') THEN 1 ELSE 0 END) AS correct_count
-      FROM srs.reviews r
-      WHERE r.user_id = $1
-        AND r.created_at >= NOW() - INTERVAL '14 days'
-      GROUP BY review_day
-      ORDER BY review_day DESC
-      LIMIT 14
-      `,
-      [userId]
-    );
+    const reviewState = await fetchReviewsColumnState(client);
+    let recentRows: Array<{ review_day: unknown; reviews_count: number; correct_count: number | null }> = [];
+
+    if (reviewState.hasGrade || reviewState.hasRating) {
+      const correctCondition = reviewState.hasGrade
+        ? "r.grade IN ('good', 'easy')"
+        : buildRatingCorrectCondition(reviewState);
+
+      const recentResult = await client.query(
+        `
+        SELECT 
+          date_trunc('day', r.created_at) AS review_day,
+          COUNT(*) AS reviews_count,
+          SUM(CASE WHEN ${correctCondition} THEN 1 ELSE 0 END) AS correct_count
+        FROM srs.reviews r
+        WHERE r.user_id = $1
+          AND r.created_at >= NOW() - INTERVAL '14 days'
+        GROUP BY review_day
+        ORDER BY review_day DESC
+        LIMIT 14
+        `,
+        [userId]
+      );
+
+      recentRows = recentResult.rows as Array<{
+        review_day: unknown;
+        reviews_count: number;
+        correct_count: number | null;
+      }>;
+    }
 
     res.json({
       stats,
-      recentReviews: recentResult.rows
+      recentReviews: recentRows
         .map(row => ({
-          date: (row.review_day as Date).toISOString(),
+          date: formatReviewDay(row.review_day),
           reviews_count: Number(row.reviews_count),
           correct_count: Number(row.correct_count ?? 0)
         }))
@@ -592,6 +780,38 @@ app.delete('/api/teacher/students/:studentId', async (req: Request, res: Respons
   try {
     await client.query('BEGIN');
 
+    const dependentTables = ['srs.reviews', 'srs.card_state', 'srs.student_progress'];
+    const missingDeletePrivileges: string[] = [];
+
+    for (const table of dependentTables) {
+      try {
+        await client.query(`DELETE FROM ${table} WHERE user_id = $1`, [studentId]);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === '42501') {
+          missingDeletePrivileges.push(table);
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (missingDeletePrivileges.length > 0) {
+      await client.query('ROLLBACK');
+      console.warn(
+        `Missing delete privileges for dependent tables (${missingDeletePrivileges.join(
+          ', '
+        )}); attempting archive fallback.`
+      );
+      const archived = await archiveStudent(studentId);
+      if (archived) {
+        return res.json({ success: true, archived: true, message: archived.message });
+      }
+      return res
+        .status(403)
+        .json({ error: 'Insufficient database privileges to remove student data.' });
+    }
+
     const result = await client.query(
       `DELETE FROM srs.users
        WHERE id = $1 AND user_type = 'student'
@@ -605,9 +825,20 @@ app.delete('/api/teacher/students/:studentId', async (req: Request, res: Respons
     }
 
     await client.query('COMMIT');
-    res.json({ success: true });
+    res.json({ success: true, removed: true });
   } catch (err) {
     await client.query('ROLLBACK');
+    const { code } = err as { code?: string };
+    if (code === '42501') {
+      const archived = await archiveStudent(studentId);
+      if (archived) {
+        return res.json({ success: true, archived: true, message: archived.message });
+      }
+      console.warn('Unable to archive student after permission denied during delete.');
+      return res
+        .status(403)
+        .json({ error: 'Insufficient database privileges to remove student data.' });
+    }
     console.error('Failed to delete student', err);
     res.status(500).json({ error: 'Failed to delete student' });
   } finally {
@@ -636,11 +867,35 @@ app.get('/api/cards', async (req: Request, res: Response) => {
     limit = parsed;
   }
 
+  const setParam = typeof req.query.set === 'string' ? req.query.set.trim().toLowerCase() : null;
+  let practiceSet: '9x9' | 'full' = 'full';
+  if (setParam) {
+    if (setParam === '9x9') {
+      practiceSet = '9x9';
+    } else if (setParam === 'full') {
+      practiceSet = 'full';
+    } else {
+      return res.status(400).json({ error: 'Invalid set' });
+    }
+  }
+
   const params: (string | number)[] = [userId];
   let limitClause = '';
   if (limit !== undefined) {
     params.push(limit);
     limitClause = `LIMIT $${params.length}`;
+  }
+
+  let setClause = '';
+  if (practiceSet === '9x9') {
+    const factorMatch = "regexp_match(lower(c.front), '(\\d+)\\D+(\\d+)')";
+    const factor1Expr = `COALESCE(((${factorMatch})[1])::integer, 100)`;
+    const factor2Expr = `COALESCE(((${factorMatch})[2])::integer, 100)`;
+    setClause = `
+      AND (
+        ${factor1Expr} <= 9
+        AND ${factor2Expr} <= 9
+      )`;
   }
 
   const { rows } = await pool.query(
@@ -658,6 +913,7 @@ app.get('/api/cards', async (req: Request, res: Response) => {
     INNER JOIN srs.cards c ON c.id = cs.card_id
     WHERE cs.user_id = $1
       AND cs.due_at <= NOW()
+    ${setClause}
     ORDER BY cs.due_at ASC, c.id ASC
     ${limitClause}
     `,

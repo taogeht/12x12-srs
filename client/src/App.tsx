@@ -11,9 +11,12 @@ interface User {
   user_type: string;
 }
 
+type PracticeSet = '9x9' | 'full';
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [sessionSize, setSessionSize] = useState<number | null>(null);
+  const [practiceSet, setPracticeSet] = useState<PracticeSet | null>(null);
   const [cards, setCards] = useState<CardDTO[]>([]);
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -29,13 +32,21 @@ export default function App() {
   }, [currentUser, isTeacherRoute]);
 
   useEffect(() => {
-    if (sessionSize !== null && currentUser && currentUser.user_type !== 'teacher') {
+    if (
+      sessionSize !== null &&
+      practiceSet !== null &&
+      currentUser &&
+      currentUser.user_type !== 'teacher'
+    ) {
       let active = true;
       setLoading(true);
       setError(null);
       (async () => {
         try {
-          const res = await fetch(`/api/cards?limit=${sessionSize}`, {
+          const params = new URLSearchParams();
+          params.set('limit', String(sessionSize));
+          params.set('set', practiceSet);
+          const res = await fetch(`/api/cards?${params.toString()}`, {
             headers: { 'X-User-Id': currentUser.id }
           });
           if (!res.ok) {
@@ -43,7 +54,7 @@ export default function App() {
           }
           const data: CardDTO[] = await res.json();
           if (active) {
-        setCards(data);
+            setCards(data);
           }
         } catch (err) {
           console.error('Failed to fetch cards', err);
@@ -61,7 +72,7 @@ export default function App() {
         active = false;
       };
     }
-  }, [sessionSize, currentUser]);
+  }, [sessionSize, practiceSet, currentUser]);
 
   // Show login page if no user is logged in
   if (!currentUser) {
@@ -122,13 +133,15 @@ export default function App() {
     return <TeacherDashboard userId={currentUser.id} onLogout={() => setCurrentUser(null)} />;
   }
 
-  if (sessionSize === null) {
+  if (practiceSet === null || sessionSize === null) {
     return (
       <SessionSetup
-        onSelect={(size) => {
+        initialSet={practiceSet}
+        onStart={({ size, chosenSet }) => {
           setError(null);
           setCards([]);
           setCurrentCardIndex(0);
+          setPracticeSet(chosenSet);
           setSessionSize(size);
         }}
       />
@@ -163,6 +176,7 @@ export default function App() {
               setLoading(true);
               setCards([]);
               setCurrentCardIndex(0);
+              setPracticeSet(null);
               setSessionSize(null);
             }}
             style={{
@@ -208,6 +222,7 @@ export default function App() {
               setSessionSize(null);
               setLoading(true);
               setCards([]);
+              setPracticeSet(null);
               setCurrentCardIndex(0);
             }}
             style={{
@@ -238,6 +253,7 @@ export default function App() {
               setSessionSize(null);
               setLoading(true);
               setCards([]);
+              setPracticeSet(null);
               setError(null);
               setCurrentCardIndex(0);
             }}
@@ -251,6 +267,9 @@ export default function App() {
           </h2>
           <div style={{ fontSize: '14px', color: '#666', margin: '0 0 8px 0' }}>
             @{currentUser.username} • Student Account
+          </div>
+          <div style={{ fontSize: '14px', color: '#666' }}>
+            Practice Set: {practiceSet === '9x9' ? '9×9 Times Table' : 'Full Times Table'}
           </div>
         </div>
       </div>
@@ -267,7 +286,25 @@ export default function App() {
   );
 }
 
-function SessionSetup({ onSelect }: { onSelect: (size: number) => void }) {
+function SessionSetup({
+  onStart,
+  initialSet
+}: {
+  onStart: (options: { size: number; chosenSet: PracticeSet }) => void;
+  initialSet?: PracticeSet | null;
+}) {
+  const [selectedSet, setSelectedSet] = useState<PracticeSet | null>(initialSet ?? null);
+
+  useEffect(() => {
+    setSelectedSet(initialSet ?? null);
+  }, [initialSet]);
+
+  const setOptions: { id: PracticeSet; label: string; description: string }[] = [
+    { id: '9x9', label: '9×9', description: 'Focus on factors 1–9' },
+    { id: 'full', label: 'Full Table', description: 'Complete factors 1–12' }
+  ];
+  const sessionSizes = [5, 10, 15, 20];
+
   return (
     <div style={{
       display: 'flex',
@@ -284,33 +321,59 @@ function SessionSetup({ onSelect }: { onSelect: (size: number) => void }) {
         boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
         textAlign: 'center'
       }}>
-        <h1 style={{ marginBottom: '8px', color: '#333' }}>12×12 Multiplication Practice</h1>
-        <p style={{ marginBottom: '32px', color: '#666' }}>How many cards would you like to practice?</p>
-        
+        <h1 style={{ marginBottom: '8px', color: '#333' }}>12x12</h1>
+        <p style={{ marginBottom: '16px', color: '#666' }}>Pick a practice set, then choose your session size.</p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(120px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+          {setOptions.map(option => {
+            const isSelected = selectedSet === option.id;
+            return (
+              <button
+                key={option.id}
+                onClick={() => setSelectedSet(option.id)}
+                style={{
+                  padding: '20px 24px',
+                  fontSize: '20px',
+                  fontWeight: 'bold',
+                  border: isSelected ? '2px solid #28a745' : '2px solid #007bff',
+                  backgroundColor: isSelected ? '#28a745' : 'white',
+                  color: isSelected ? 'white' : '#007bff',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {option.label}
+                <div style={{ fontSize: '14px', fontWeight: 'normal', marginTop: '8px', color: isSelected ? 'white' : '#555' }}>
+                  {option.description}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <p style={{ marginBottom: '16px', color: '#666' }}>How many cards would you like to practice?</p>
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '32px' }}>
-          {[5, 10, 15, 20].map(size => (
+          {sessionSizes.map(size => (
             <button
               key={size}
-              onClick={() => onSelect(size)}
+              onClick={() => {
+                if (!selectedSet) return;
+                onStart({ size, chosenSet: selectedSet });
+              }}
+              disabled={!selectedSet}
               style={{
                 padding: '24px 32px',
                 fontSize: '24px',
                 fontWeight: 'bold',
                 border: '2px solid #007bff',
-                backgroundColor: 'white',
-                color: '#007bff',
+                backgroundColor: !selectedSet ? '#f1f1f1' : 'white',
+                color: !selectedSet ? '#999' : '#007bff',
                 borderRadius: '8px',
-                cursor: 'pointer',
+                cursor: !selectedSet ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s ease',
                 minWidth: '120px'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.backgroundColor = '#007bff';
-                e.currentTarget.style.color = 'white';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.backgroundColor = 'white';
-                e.currentTarget.style.color = '#007bff';
               }}
             >
               {size}

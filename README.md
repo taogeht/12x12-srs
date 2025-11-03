@@ -1,6 +1,6 @@
-# Spaced Repetition Flashcard Application
+# 12x12
 
-A modern full-stack flashcard application with React TypeScript frontend and Node.js Express backend, featuring spaced repetition learning using the SM-2 algorithm.
+12x12 is a full-stack multiplication practice application with a React TypeScript frontend and a Node.js Express backend, featuring spaced repetition learning with the SM-2 algorithm.
 
 ## Project Structure
 
@@ -14,7 +14,7 @@ A modern full-stack flashcard application with React TypeScript frontend and Nod
 ├── server/                # Node.js TypeScript backend
 │   ├── src/
 │   │   └── server.ts      # Express API with SM-2 algorithm
-│   ├── migrations/         # Database schema and sample data
+│   ├── migrations/         # Database schema and seed data for multiplication cards
 │   │   └── 001_initial.sql
 │   ├── .env              # Environment variables
 │   ├── tsconfig.json     # TypeScript configuration
@@ -28,6 +28,7 @@ A modern full-stack flashcard application with React TypeScript frontend and Nod
 - **Frontend**: React 19 with TypeScript, Axios for API calls, Interactive flashcard interface
 - **Backend**: Node.js with Express, TypeScript, PostgreSQL, Zod validation
 - **Spaced Repetition**: SM-2 algorithm implementation for optimal learning intervals
+- **Practice Modes**: Students choose between focused 9×9 practice or the full times table before each session
 - **Database**: PostgreSQL with proper schema for users, cards, and progress tracking
 - **Development**: Hot reload for both frontend and backend, TypeScript support
 - **API Integration**: RESTful endpoints for cards and review submissions
@@ -58,11 +59,19 @@ Run database migrations:
 npm run setup-db
 ```
 
+The migration loads the full 12 × 12 multiplication deck but intentionally leaves the user tables empty. Create your first teacher account before logging in:
+
+```bash
+psql "$DATABASE_URL" -c "INSERT INTO srs.users (username, display_name, user_type, picture_password) VALUES ('teacher', 'Ms. Example', 'teacher', '1') ON CONFLICT (username) DO NOTHING;"
+```
+
+Choose a `picture_password` value from `1` through `5` to match the emoji tiles on the login screen. After signing in as a teacher you can add students from the dashboard.
+
 ### 2. Install and Run Applications
 
 ```bash
 # Navigate to project directory
-cd /Users/bryce/Desktop/12x12
+cd path/to/12x12
 
 # Install all dependencies (root, client, and server)
 npm run install-all
@@ -130,10 +139,10 @@ This application implements the SM-2 (SuperMemo 2) algorithm for optimal learnin
 - **Good (2)**: Normal progress, increase interval based on ease factor
 - **Easy (3)**: Significantly increase interval, boost ease factor
 
-## Flashcard Interface
+## Practice Interface
 
 - Click cards to flip between question and answer
-- Use the four difficulty buttons to rate your recall
+- Use the four difficulty buttons to rate your recall after answering each multiplication problem
 - View progress statistics (interval, ease factor, repetitions)
 - Cards automatically advance after review
 
@@ -152,7 +161,12 @@ This application implements the SM-2 (SuperMemo 2) algorithm for optimal learnin
 PORT=3001
 NODE_ENV=development
 DATABASE_URL=postgresql://username:password@localhost:5432/flashcards
+# Optional: override detected privileges for srs.student_progress.
+# Accepts values like none, read, write, all, or a comma list (e.g., select,update).
+STUDENT_PROGRESS_PRIVILEGES=none
 ```
+
+Use `STUDENT_PROGRESS_PRIVILEGES` when your database role reports broader access than you want the app to exercise. The value can be `none`, `read`, `write`, `all`, or a comma-separated list of `select`, `insert`, and `update`.
 
 ### Frontend
 Create React App supports environment variables prefixed with `REACT_APP_`:
@@ -171,7 +185,7 @@ REACT_APP_API_URL=http://localhost:3001
 1. Set up PostgreSQL database and run migrations
 2. Start both apps using `npm start`
 3. Open http://localhost:3000 in your browser
-4. You should see the flashcard interface with sample cards
+4. You should see the practice interface with cards due for review
 5. Test the spaced repetition by reviewing cards
 
 ## Next Steps
